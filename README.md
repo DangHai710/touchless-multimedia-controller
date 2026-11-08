@@ -50,7 +50,7 @@ python -m venv venv
 venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-python main.py
+python src\main.py
 ```
 ### Linux
 Open a terminal.
@@ -62,6 +62,7 @@ python3 -m venv venv
 source venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
+python3 src/main.py
 ```
 
 
@@ -110,8 +111,9 @@ The system uses hand landmarks and finger positions to recognize different inter
 ```text
 virtual-board/
 │
-├── main.py
-├── classes.py
+├── src/
+│   ├── main.py
+│   └── classes.py
 ├── requirements.txt
 ├── README.md
 │
