@@ -195,6 +195,7 @@ def main():
     ok, test_frame = tracker.video_capture.read()
     if not ok or test_frame is None:
         print("[LOI] Khong the ket noi webcam. Vui long kiem tra camera.")
+        tracker.release()
         return
 
     h, w = test_frame.shape[:2]
@@ -243,9 +244,9 @@ def main():
         left_hand, right_hand = tracker.split_hands(results)
 
         # Vẽ khung xương nhận diện
-        if left_hand:
+        if left_hand is not None:
             tracker.draw_landmarks(frame, left_hand)
-        if right_hand:
+        if right_hand is not None:
             tracker.draw_landmarks(frame, right_hand)
 
         # Tính toán cử chỉ và thời gian nghỉ
@@ -255,13 +256,13 @@ def main():
         right_wait = get_wait_time(right_last_action_time)
 
         # Xử lý tay trái
-        if left_hand:
+        if left_hand is not None:
             handle_left_hand(left_hand, swipe_left, hud, w, h)
         else:
             swipe_left.reset()
 
         # Xử lý tay phải
-        if right_hand:
+        if right_hand is not None:
             handle_right_hand(right_hand, swipe_right, hud, w, h)
         else:
             swipe_right.reset()

@@ -1,7 +1,6 @@
 """
-tracker.py — Module quản lý webcam và trích xuất bàn tay
+tracker.py — Module quản lý webcam và trích xuất bàn tay.
 Sử dụng OpenCV và MediaPipe Hands.
-Đã xử lý chính xác việc phân biệt Tay Trái / Tay Phải trên khung hình soi gương (mirrored frame).
 """
 
 import cv2 as cv
@@ -59,30 +58,31 @@ class Tracker:
 
     def split_hands(self, results):
         """
-        Phân loại chính xác Tay Trái và Tay Phải của người dùng.
+        Phân loại tay trái/phải theo nhãn handedness của MediaPipe.
 
-        LƯU Ý QUAN TRỌNG VỀ LẬT GƯƠNG (MIRROR EFFECT):
-        Vì ảnh đầu vào đã được lật ngang (cv.flip), góc nhìn giải phẫu học của
-        MediaPipe sẽ bị đảo ngược:
-          - MediaPipe 'Right' -> Thực tế là TAY TRÁI của người dùng
-          - MediaPipe 'Left'  -> Thực tế là TAY PHẢI của người dùng
-
-        Đồng thời, kết hợp vị trí tọa độ X trên màn hình soi gương:
-          - Tay bên trái màn hình (x nhỏ hơn) = TAY TRÁI của người dùng
-          - Tay bên phải màn hình (x lớn hơn) = TAY PHẢI của người dùng
+        ``get_frame`` đã lật ảnh thành dạng soi gương trước khi gọi
+        ``hands.process``. MediaPipe được thiết kế để nhận ảnh soi gương, vì
+        vậy nhãn ``Left``/``Right`` lúc này là tay trái/phải thực tế của
+        người dùng và không được đảo lại. Tọa độ X chỉ dùng khi kết quả thiếu
+        nhãn hoặc MediaPipe trả về hai nhãn trùng nhau.
 
         Trả về: (left_hand_landmarks, right_hand_landmarks)
         """
-        left_hand = None
-        right_hand = None
-
-        if not results.multi_hand_landmarks:
+        if results is None or not results.multi_hand_landmarks:
             return None, None
 
         detected = []
         for idx, hand_lm in enumerate(results.multi_hand_landmarks):
-            mp_label = results.multi_handedness[idx].classification[0].label
-            score = results.multi_handedness[idx].classification[0].score
+            mp_label = None
+            score = 0.0
+            if (
+                results.multi_handedness
+                and idx < len(results.multi_handedness)
+                and results.multi_handedness[idx].classification
+            ):
+                classification = results.multi_handedness[idx].classification[0]
+                mp_label = classification.label
+                score = classification.score
             wrist_x = hand_lm.landmark[0].x  # Landmark 0 = Cổ tay (Wrist)
             detected.append({
                 "landmarks": hand_lm,
@@ -91,31 +91,42 @@ class Tracker:
                 "wrist_x": wrist_x,
             })
 
-        if len(detected) == 1:
-            h = detected[0]
-            # Đảo nhãn MediaPipe do lật gương: 'Right' -> Trái thực tế, 'Left' -> Phải thực tế
-            is_physical_left = (h["mp_label"] == "Right")
+        left_candidates = [
+            item for item in detected if item["mp_label"] == "Left"
+        ]
+        right_candidates = [
+            item for item in detected if item["mp_label"] == "Right"
+        ]
 
-            # Kiểm tra phụ theo vị trí nửa màn hình nếu ở vùng biên rõ ràng
-            if h["wrist_x"] < 0.35:
-                is_physical_left = True
-            elif h["wrist_x"] > 0.65:
-                is_physical_left = False
+        # Dùng nhãn có độ tin cậy cao nhất khi MediaPipe nhận diện đủ hai bên.
+        left = max(left_candidates, key=lambda item: item["score"], default=None)
+        right = max(right_candidates, key=lambda item: item["score"], default=None)
+        assigned = {id(left), id(right)} - {id(None)}
+        unassigned = [item for item in detected if id(item) not in assigned]
 
-            if is_physical_left:
-                left_hand = h["landmarks"]
+        if len(detected) == 1 and unassigned:
+            # Khi chỉ có một tay và nhãn không dùng được, vị trí giữa khung
+            # là ranh giới an toàn nhất để chọn vai trò tạm thời. Vì ảnh đã
+            # soi gương, tay trái thực tế xuất hiện ở phía phải khung hình.
+            item = unassigned[0]
+            if item["wrist_x"] > 0.5:
+                left = item
             else:
-                right_hand = h["landmarks"]
+                right = item
+            unassigned.clear()
 
-        elif len(detected) >= 2:
-            # Khi có 2 bàn tay trong khung hình soi gương:
-            # Bàn tay có tọa độ X nhỏ hơn chắc chắn là TAY TRÁI (nằm bên trái người dùng)
-            # Bàn tay có tọa độ X lớn hơn chắc chắn là TAY PHẢI (nằm bên phải người dùng)
-            detected.sort(key=lambda item: item["wrist_x"])
-            left_hand = detected[0]["landmarks"]
-            right_hand = detected[1]["landmarks"]
+        # Nếu nhãn bị thiếu/trùng, xếp phần còn lại theo vị trí trên ảnh soi gương.
+        # Trên ảnh soi gương, tay trái thực tế nằm phía phải khung hình.
+        unassigned.sort(key=lambda item: item["wrist_x"], reverse=True)
+        if left is None and unassigned:
+            left = unassigned.pop(0)
+        if right is None and unassigned:
+            right = unassigned.pop(0)
 
-        return left_hand, right_hand
+        return (
+            left["landmarks"] if left is not None else None,
+            right["landmarks"] if right is not None else None,
+        )
 
     def release(self):
         """Giải phóng tài nguyên camera."""
